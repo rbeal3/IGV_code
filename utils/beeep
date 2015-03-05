@@ -1,0 +1,5 @@
+#!/bin/bash
+
+beep -f 400 -l 500
+beep -f 500 -l 500
+beep -f 600 -l 500
