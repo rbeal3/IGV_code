@@ -19,23 +19,42 @@ float * seg_info(pcl::PointCloud<pcl::PointXYZRGB>::Ptr incloud) ;
 void test_view(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud);
 void passMap(pcl::PointCloud<pcl::PointXYZRGB>::Ptr incloud);
 
+/*
+format
+area_seg cloud.pcd 
+area_seg cloud.pcd Xmin Xmax Ymin Ymax Zmin Zmax
+
+*/
 int main(int argc, char** argv)
 {
-	if (argv[1]==NULL){
-		std::cout << "needs a file name to segment" <<std::endl;
-	}
 	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>() );
+	if (argc == 0){
+		std::cout << "needs a file name to segment" <<std::endl;
+		return 1;
+	}
 	if (pcl::io::loadPCDFile<pcl::PointXYZRGB> (argv[1], *cloud) == -1)
 	{
 		PCL_ERROR ("Couldn't read the input file \n");
 		return (-1);
 	}
-	//std::string outname="tiny_cloud.pcd";
-	//pcl::PointCloud<pcl::PointXYZRGB> m_cloud(area_seg(-1.2, 0, -1.3, 0 ,1.9, 2.0, cloud, outname));
-	//pcl::PointCloud<pcl::PointXYZRGB> m_cloud(area_seg(cloud, outname));
+	// Create 200 by 100 y foot vector, dividiing each square into 4 inch segments
+		std::vector< std::vector<int> > feild_vec(3*200, std::vector<int>(3*100));
 
-	passMap(cloud);
+
+	//just do simple command line segment
+	if(argc == 8) {
+		seg_info(cloud);
+		//here
+		pcl::PointCloud<pcl::PointXYZRGB> m_cloud(area_seg(atof(argv[2]), atof(argv[3]), atof(argv[4]), atof(argv[5]), atof(argv[6]), atof(argv[7]), cloud, "tiny_cloud.pcd"));
+		pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud2(&m_cloud);
+		seg_info(cloud2);
+	}
+	else {
+		passMap(cloud);
+	}
+		feild_vec[2][3] = 10;
 	return 0;
+		int a = feild_vec[3][4];
 }
 
 pcl::PointCloud<pcl::PointXYZRGB> area_seg(float startx, float stopx, float starty, float stopy, float startz, float stopz, pcl::PointCloud<pcl::PointXYZRGB>::Ptr inCloud, std::string outname) {
@@ -78,16 +97,17 @@ pcl::PointCloud<pcl::PointXYZRGB> area_seg(float startx, float stopx, float star
 		outCloud.height = accepted_counter;
 	// Save points to disk
 	pPointFile = fopen( outname.c_str(), "w+" );
+	pcl::io::savePCDFile (outname.c_str(), outCloud);
 
 	int cursorLocation  = ftell(pPointFile);
 	fseek(pPointFile, 0L, SEEK_END);
 	int fileSize =ftell(pPointFile);
 	fseek(pPointFile, 0L, cursorLocation);
 
+
 	if ( pPointFile != NULL &&  fileSize>1) {
 		//printf("Opening output file %s\n", outname);
 		std::cout << "***saving*** " << outCloud.points.size() << " points" << std::endl;
-			pcl::io::savePCDFile (outname.c_str(), outCloud);
 		std::cout << "File " << outname << " written sucessfully"<<std::endl;
 	}
 	else {
@@ -95,6 +115,9 @@ pcl::PointCloud<pcl::PointXYZRGB> area_seg(float startx, float stopx, float star
 		std::cout<<"Error opening output file"<< outname << std::endl;
 	}
 	fclose(pPointFile);
+	//seg fault here
+	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_pointer(&outCloud);
+	test_view(cloud_pointer);
 	return outCloud;
 }
 
@@ -183,11 +206,12 @@ void passMap(pcl::PointCloud<pcl::PointXYZRGB>::Ptr incloud) {
 		 x_min = info_array[minBound_x]; x_max = info_array[maxBound_x];
 		 z_min = info_array[minBound_z]; z_max = info_array[maxBound_z];
 
+//seg fault
 		z_row_cloud =  area_seg(x_min, x_max, floor_min, floor_max, z, z+area, incloud, outname);
 
 //open the cloud viewer
 		pcl::PointCloud<pcl::PointXYZRGB>::Ptr z_row_pointer(&z_row_cloud);
-		test_view(z_row_pointer);
+		//test_view(z_row_pointer);
 		//get bounds for new seg with x 
 			std::cout << "after segment Z row info" << std::endl;
 			info_array = seg_info(z_row_pointer);
@@ -199,18 +223,18 @@ void passMap(pcl::PointCloud<pcl::PointXYZRGB>::Ptr incloud) {
 			ss << "x_row_"  << std::setprecision(3) << x<< ".pcd";
 			std::cout << "X Segment outname: " << ss.str() << std::endl;
 
-//there is seg fault here:
+//there is seg fault from area seg here:
 		x_partFrom_z_row = area_seg(x, x+area, floor_min, floor_max, z, z+area, z_row_pointer, ss.str()) ;
 
 		//open cloud viewer
 			pcl::PointCloud<pcl::PointXYZRGB>::Ptr test_pointer(&x_partFrom_z_row);
-			test_view(test_pointer);
+			//test_view(test_pointer);
 
 			std::cout<< "x part from z row size: " << x_partFrom_z_row.size() <<std::endl;
 			//eliminate data that is too small for a cloud.
 			if(x_partFrom_z_row.size()<100) {
 				if(x_partFrom_z_row.size()>800) {
-outname					//area has enough points to be safe
+//outname					//area has enough points to be safe
 						r=0; b=255;
 				}
 				else { 
@@ -223,7 +247,9 @@ outname					//area has enough points to be safe
 				finalCloud += x_partFrom_z_row;
 			}
 		}
+		std::cout << "print total so far" << std::endl;
 	}
+	std::cout << "print full final" << std::endl;
 }
 void test_view(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud){
 	boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer (new pcl::visualization::PCLVisualizer ("3D Viewer"));

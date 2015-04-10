@@ -3,7 +3,6 @@ import socket
 import sys
 import os
 
-
 # Define some colors
 BLACK    = (   0,   0,   0)
 WHITE    = ( 255, 255, 255)
@@ -53,7 +52,7 @@ except:
     sys.exit(1)
 
 print "Successfully connected, initializing movement variables"
-cmd = 'AC 0,50000,0,0,50000; DC 0,50000,0,0,50000;\r'
+cmd = 'AC 0,0,0,0,50000,50000; DC 0,0,0,0,50000,50000;\r'
 sock.sendall(cmd)
 cmd = 'OE 1,1,1,1,1,1,1,1;\r'
 sock.sendall(cmd)
@@ -129,12 +128,20 @@ while done==False:
             textPrint.printt(screen, "Axis {} value: {:>6.3f}".format(i, axis) )
         textPrint.unindent()
 
+        buttons = joystick.get_numbuttons()
+        for i in range( buttons ):
+ 
+           button = joystick.get_button( i )
+           textPrint.printt(screen, "Button {:>2} value: {}".format(i,button) )
+
+        textPrint.unindent()
+
         lMotor += forwardMovement - turnMovement
         rMotor += forwardMovement + turnMovement
         if forwardMovement  == 0 and turnMovement == 0:
             cmd = 'ST;'
         else:
-            cmd = 'JG 0,'+ str(int(lMotor)) + ',0,0,' + str(int(rMotor)) + ';BG;\r'
+            cmd = 'JG 0,0,0,0,'+ str(int(lMotor)) + str(int(rMotor)) + ';BG;\r'
         sock.sendall(cmd)
         data = sock.recv(1024)
 
