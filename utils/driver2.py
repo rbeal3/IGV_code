@@ -1,4 +1,5 @@
 import pygame
+import time
 import socket
 import sys
 import os
@@ -52,7 +53,7 @@ except:
     sys.exit(1)
 
 print "Successfully connected, initializing movement variables"
-cmd = 'AC 0,0,0,0,50000,50000; DC 0,0,0,0,50000,50000;\r'
+cmd = 'AC 0,0,0,0,5000,5000; DC 0,0,0,0,50000,50000;\r'
 sock.sendall(cmd)
 cmd = 'OE 1,1,1,1,1,1,1,1;\r'
 sock.sendall(cmd)
@@ -118,36 +119,37 @@ while done==False:
         for i in range( axes ):
             axis = joystick.get_axis( i )
             if i == 1 and abs(axis) > 0.1:
-                forwardMovement = -10000*axis
+                forwardMovement = -20000*axis
             elif i == 1 and abs(axis) < 0.15:
                 forwardMovement = 0
             if i == 3 and abs(axis) > 0.1:
                 turnMovement = -8000*axis
             elif i == 3 and abs(axis) < 0.15:
                 turnMovement = 0
-            textPrint.printt(screen, "Axis {} value: {:>6.3f}".format(i, axis) )
-        textPrint.unindent()
+            #textPrint.printt(screen, "Axis {} value: {:>6.3f}".format(i, axis) )
+        #textPrint.unindent()
 
         buttons = joystick.get_numbuttons()
         for i in range( buttons ):
  
            button = joystick.get_button( i )
-           textPrint.printt(screen, "Button {:>2} value: {}".format(i,button) )
+           #textPrint.printt(screen, "Button {:>2} value: {}".format(i,button) )
+					 #time.sleep(0.1)
 
-        textPrint.unindent()
+        #textPrint.unindent()
 
-        lMotor += forwardMovement - turnMovement
-        rMotor += forwardMovement + turnMovement
+        lMotor = forwardMovement + turnMovement
+        rMotor = forwardMovement - turnMovement
         if forwardMovement  == 0 and turnMovement == 0:
             cmd = 'ST;'
         else:
-            cmd = 'JG 0,0,0,0,'+ str(int(lMotor)) + str(int(rMotor)) + ';BG;\r'
+            cmd = 'JG 0,0,0,0,'+ str(int(lMotor))+ ',' + str(int(rMotor)) + ';BG;\r'
         sock.sendall(cmd)
         data = sock.recv(1024)
 
-        textPrint.printt(screen, "lMotor value: {:>6.3f}".format(lMotor))
-        textPrint.printt(screen, "rMotor value: {:>6.3f}".format(rMotor))
-        textPrint.printt(screen, "Sending cmd: " + cmd)
+        #textPrint.printt(screen, "lMotor value: {:>6.3f}".format(lMotor))
+        #textPrint.printt(screen, "rMotor value: {:>6.3f}".format(rMotor))
+        #textPrint.printt(screen, "Sending cmd: " + cmd)
         cmd = 'TE;'
         sock.sendall(cmd+ '\r')
         data = sock.recv(1024)
@@ -162,7 +164,7 @@ while done==False:
     pygame.display.flip()
 
     # Limit to 20 frames per second
-    clock.tick(20)
+    clock.tick(5)
     
 # Close the window and quit.
 # If you forget this line, the program will 'hang'
