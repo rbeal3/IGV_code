@@ -1,10 +1,8 @@
-1
-2
-3
-4
-5
+bearing 1
+long 1020
+lat 1030
+shit 4
+whatIsThis 50
 6
-7
-8
 9
 10

@@ -10,39 +10,89 @@ int main(){
 	std::string  str;
 	//latitude, longitude, bearing, altitude, speed, time,
 
-	std::ifstream myfile("gpsData.txt");
+	std::ifstream gpsData("gpsData.txt");
+	std::ifstream gpsGoals("gpsGoals.txt");
 
 	double * m_position = new double [6];
-	if (myfile.is_open())
+	double * goal_lat = new double [10];
+	double * goal_long = new double [10];
+
+	if (gpsData.is_open())
 	{
-		for(int info=0; info <=5; info++){
-			getline(myfile, str);
-			std::cout << " "  << str  << std::endl;
-			str.erase(0, str.find("=")+1);
+		for(int info=0; info < 5; info++){
+			getline(gpsData, str);
+			//std::cout << "data from file:"  << str  << std::endl;
+			str.erase(0, str.find(" "));
 			m_position[info] = atof(str.c_str());
+			//std::cout << "data in array:"  << m_position[info]  << std::endl;
 		}
 	}
-		std::string str_desired_longitude, str_desired_latitude;
-		double desired_longitude, desired_latitude;
-		//get gps from user
-		std::cout << "enter desired latitude" << std::endl;
-		getline(std::cin, str_desired_latitude);
-		std::cout << "enter desired longitude" << std::endl;
-		getline(std::cin, str_desired_longitude);
+	else{
+		std::cout << "Error: No GPS file found!"  << std::endl;
+	}
+	//get number of goals
+	int goals=0;
+	while (std::getline(gpsGoals,str)) {
+		goals++;
+	}
+	goals/=3;//3 lines per single entry
 
-		 desired_latitude = atof(str_desired_latitude.c_str());
-		 desired_longitude = atof(str_desired_longitude.c_str());
+	std::cout << "There are " << goals << " GPS goals" << std::endl;
+	gpsGoals.clear();
+	gpsGoals.seekg(0, gpsGoals.beg);
+
+	if (gpsGoals.is_open())
+	{
+		for(int goal=0; goal < goals; goal++){
+			getline(gpsGoals, str);
+			getline(gpsGoals, str);
+			str.erase(0, str.find(" ")+1);
+			goal_lat[goal]= atof(str.c_str());
+			getline(gpsGoals, str);
+			str.erase(0, str.find(" ")+1);
+			goal_long[goal]= atof(str.c_str());
+		}
+	}
+	else{
+		std::cout << "Error: No goals file exists" << std::endl;
+	}
 
 	double my_bearing = 10;//m_position[3];
 	std::cout << "don't forget to set bearing here!" << std::endl;
 
-	double x_difference = m_position[0] - desired_latitude; //difference is positive if goal is west
-	double y_difference = desired_longitude - m_position[1]; //difference is positive if north
+	for(int i=0; i<5; i++){
+		std::cout << "position Info " << m_position[i] << std::endl;
+	}
+	for(int i=0; i<goals; i++){
+		std::cout << "lat: " << goal_lat[i] << std::endl;
+		std::cout << "lon: " << goal_long[i] << std::endl;
+		
+	}
+	for(int i=0; i<goals; i++){
 
-//set bearing
-	double correct_bearing, correct_angle = atan(x_difference/y_difference)*180/PI; 
-	// tan c_a = o/a
+		double x_diff = m_position[1] - goal_lat[i]; //difference is positive if goal is west
+		double y_diff = goal_long[i] - m_position[2]; //difference is positive if north
 
+	//set bearing
+		//double correct_angle = atan(x_difference/y_difference)*180/PI; 
+		double correctBearing, Theta = atan2(y_diff, x_diff)*180/PI; 
+		if (Theta <= 0){
+			correctBearing = (Theta * -1) + 90;
+		}
+		else if (Theta > 90) {
+			Theta -= 90;
+			correctBearing = 360 - Theta;
+		}
+		else {//theta 
+			correctBearing = 90-Theta;
+		}
+		// tan = o/a
+
+		std::cout << "new bearing " << correctBearing << std::endl;
+	}
+	return 0;
+}
+	/*
 	std::cout << "calculation check:!" << std::endl;
 	std::cout << "x_difference: "<< x_difference << std::endl;
 	std::cout << "y_difference: "<< y_difference << std::endl;
@@ -61,7 +111,7 @@ int main(){
 	}
 
 	std::cout << "new bearing " << correct_bearing << std::endl;
-
+//
 //handels driving after bearing is determined
 	if(my_bearing == correct_bearing){
 		//stay true, go straight
@@ -74,6 +124,5 @@ int main(){
 	{ 
 		//turn left
 	}
+	*/
 
-	return 0;
-}
