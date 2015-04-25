@@ -1,8 +1,10 @@
-#include "fc2triclops.h"
+
 #include "triclops.h"
 #include <boost/thread/thread.hpp>
 #include <cmath>
 #include <fstream>
+
+#include "fc2triclops.h"
 #include <iostream>
 #include <pcl/ModelCoefficients.h>
 #include <pcl/common/common_headers.h>
@@ -33,13 +35,13 @@ namespace FC2T = Fc2Triclops;
 
 typedef pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudPtr;
 
-enum IMAGE_SIDE {
-	CENTER= 0, LEFT =1, RIGHT, NONE
+enum REGULAR_OPERATIONS {
+	CENTER= 0, LEFT =1, RIGHT, NONE, VISION, GPS
 };
- 
+
 struct ImageContainer
 {
-	FC2::Image unprocessed[2];	
+	FC2::Image unprocessed[2];
 	FC2::Image bgru[2];
 	FC2::Image mono[2];
 	FC2::Image packed;
@@ -47,28 +49,30 @@ struct ImageContainer
 	// Container of Images used for processing
 	ImageContainer imageContainer;
 
-void compute_step ( cloudPtr cloud);
+struct Robot;
 int turn(int degrees);
-int at_goal();
+int at_goal(Robot* robot);
+int gps_target(cloudPtr cloud, Robot* robot);
+void compute_step(cloudPtr, Robot* robot);
 void test_view(cloudPtr cloud);
 
 
 int configureCamera( FC2::Camera &camera );
-int generateTriclopsContext( FC2::Camera     & camera, 
+int generateTriclopsContext( FC2::Camera     & camera,
                              TriclopsContext & triclops );
 int grabImage ( FC2::Camera & camera, FC2::Image & grabbedImage );
 int convertToBGRU( FC2::Image & image, FC2::Image & convertedImage );
-int generateTriclopsInput( FC2::Image const & grabbedImage, 
+int generateTriclopsInput( FC2::Image const & grabbedImage,
                            ImageContainer   & imageContainer,
                            TriclopsInput    & colorData,
                            TriclopsInput    & stereoData );
-int doStereo( TriclopsContext const & triclops, 
+int doStereo( TriclopsContext const & triclops,
                TriclopsInput  const & stereoData,
                TriclopsImage16      & depthImage );
 
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & grabbedImage, 
-                  TriclopsContext const & triclops, 
-                  TriclopsImage16 const & disparityImage16, 
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & grabbedImage,
+                  TriclopsContext const & triclops,
+                  TriclopsImage16 const & disparityImage16,
                   TriclopsInput   const & colorData,
                   std::string outname );
 
@@ -87,10 +91,125 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & gra
    } \
 } \
 
+struct Robot{
 
+	public:
+		//static Robot * instance;
+		Robot(){
+				//instance = new Robot();
+				method=GPS;
+				checkDirection=CENTER;
+		}
+		Robot(const Robot & source){}//disabling copy constructor
+		//Robot_singleton(const Robot_singleton && source){}//disabling move constructor
+		//Robot_singleton(Robot_singleton const &)= delete;
+		//Robot_singleton(Robot_singleton&&)= delete;
+
+		int method;
+		int checkDirection;
+		float goalBearing;
+		float goalDistance;
+		float bearing;
+		float latitude;
+		float longitude;
+		int goal_num;
+		double goal_lat[10];
+		double goal_long [10];
+
+		//Robot * getInstance() {
+			//if (instance ==NULL){ }
+			//return instance; }
+};
+
+void set_goals(Robot* robot){
+	std::string  str;
+	std::ifstream gpsGoals("gpsGoals.txt");
+
+	if (gpsGoals.is_open()) {
+		int goals=0;
+		//get number of goals
+		while (std::getline(gpsGoals,str)) {
+			goals++;
+		}
+		goals/=3;//3 lines per single entry
+		robot->goal_num=goals;
+
+		std::cout << "There are " << goals << " GPS goals" << std::endl;
+		gpsGoals.clear();
+		gpsGoals.seekg(0, gpsGoals.beg);
+		for(int goal=0; goal < goals; goal++){
+			getline(gpsGoals, str);
+			getline(gpsGoals, str);
+			str.erase(0, str.find(" ")+1);
+			robot->goal_lat[goal]= atof(str.c_str());
+			getline(gpsGoals, str);
+			str.erase(0, str.find(" ")+1);
+			robot->goal_long[goal]= atof(str.c_str());
+		}
+	}
+	else{
+		std::cout << "Error: No goals file exists" << std::endl;
+	}
+	/*debug
+		for(int i=0; i<goals; i++){
+			std::cout << "lat: " << goal_lat[i] << std::endl;
+			std::cout << "lon: " << goal_long[i] << std::endl;
+		}*/
+
+}
+
+void update_gps(Robot* robot){
+	//get singleton robot object to modify
+	std::string  str;
+	std::string command = "./client 192.168.1.102 8000 /home/pi/IGV/GPS/gpsData.txt";
+		system(command.c_str());
+
+	std::ifstream gpsData("gpsData.txt");
+
+	double * m_position = new double [6];
+	
+
+	if (gpsData.is_open()) {
+		for(int info=0; info < 5; info++){
+			getline(gpsData, str);
+			str.erase(0, str.find("=")+1);
+			m_position[info] = atof(str.c_str());
+		}
+	}
+	else{
+		std::cout << "Error: No GPS file found!"  << std::endl;
+	}
+	
+	///*Debug
+		for(int i=0; i<5; i++){
+			std::cout << "position Info " << m_position[i] << std::endl;
+		} //*/
+		double x_diff = m_position[1] - robot->goal_lat[robot->goal_num]; //difference is positive if goal is west
+		double y_diff = robot->goal_long[robot->goal_num] - m_position[2]; //difference is positive if north
+
+	//set bearing
+
+		double correctBearing, Theta = atan2(y_diff, x_diff)*180/M_PI; 
+		if (Theta <= 0){
+			correctBearing = (Theta * -1) + 90;
+		}
+		else if (Theta > 90) {
+			Theta -= 90;
+			correctBearing = 360 - Theta;
+		}
+		else {//theta 
+			correctBearing = 90-Theta;
+		}
+		robot->goalDistance=pow((pow(x_diff,2)+pow(y_diff,2)), 0.5 );
+		robot->bearing = m_position[4];
+		robot->goalBearing = correctBearing;
+		robot->latitude = m_position[0];
+		robot->longitude = m_position[1];
+	return;
+}
 
 cloudPtr plainSeg(cloudPtr cloud)
-{   
+{
   pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
   pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
   // Create the segmentation object
@@ -111,9 +230,9 @@ cloudPtr plainSeg(cloudPtr cloud)
     return cloud;
   }
 
-  std::cerr << "Model coefficients: " << coefficients->values[0] << " " 
+  std::cerr << "Model coefficients: " << coefficients->values[0] << " "
                                       << coefficients->values[1] << " "
-                                      << coefficients->values[2] << " " 
+                                      << coefficients->values[2] << " "
                                       << coefficients->values[3] << std::endl;
 
   std::cerr << "Model inliers: " << inliers->indices.size () << std::endl;
@@ -134,15 +253,39 @@ cloudPtr plainSeg(cloudPtr cloud)
 }
 
 
-cloudPtr color_segment (cloudPtr cloud) 
+void color_filter (cloudPtr cursory_conversion, pcl::PointCloud<pcl::PointXYZRGB>* whiteCloud, pcl::PointCloud<pcl::PointXYZRGB>* redCloud, pcl::PointCloud<pcl::PointXYZRGB>* blueCloud)
 {
-	//remove any dark points first
+	//remove any dark points first pcl::PointCloud
+	pcl::PointCloud<pcl::PointXYZRGB> inCloud = *cursory_conversion;
+	//pcl::PointCloud<pcl::PointXYZRGB> *outCloud = new pcl::PointCloud<pcl::PointXYZRGB>;
+	for(int i = 0; i < inCloud.points.size(); i++) {
+		if (inCloud.points[i].r>200 && inCloud.points[i].g>200 && inCloud.points[i].b>200 ){
+			whiteCloud->points.push_back(inCloud.points[i]);
+		}
+		else if (inCloud.points[i].r<80 && inCloud.points[i].g<80 && inCloud.points[i].b>150 ){
+			blueCloud->points.push_back(inCloud.points[i]);
+		}
+		else if (inCloud.points[i].r>150 && inCloud.points[i].g<80 && inCloud.points[i].b<80 ){
+			redCloud->points.push_back(inCloud.points[i]);
+		}
+	}
+		printf("Colors filtered\n");
+}
+	//pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (outCloud);
 
-	for (int i=0; i< cloud->points.size(); i++)
-	{
+	/*
+	for ( std::vector<pcl::PointXYZRGB>::iterator pit = cloud->points.begin(); pit != cloud->points.end(); ++pit){
 		//std::cout <<  cloud->points[i].r << " " << cloud->points[i].g << " " << cloud->points[i].b << std::endl;
 		//printf("r:%c g:%c b:%c\n" , cloud->points[i].r, cloud->points[i].g, cloud->points[i].b );
+		if ( cloud->points[*pit].r<200)//  cloud->points[i].g, cloud->points[i].b );
+		{
+			printf("erasing pointk");
+			cloud->points.erase(pit);
+		}
 	}
+	*/
+void color_segment (cloudPtr cloud, pcl::PointCloud<pcl::PointXYZRGB> &whiteCloud, pcl::PointCloud<pcl::PointXYZRGB> &redCloud, pcl::PointCloud<pcl::PointXYZRGB> &blueCloud)
+{
   float r_threshold = 1.0;
   float p_threshold = 1.0;
   int neighbors = 50;
@@ -182,8 +325,8 @@ cloudPtr color_segment (cloudPtr cloud)
   for (int counter = 0; counter < clusters.size(); counter++)
   {
 		if (clusters[counter].indices.size() > largest_cluster_size){
-		 largest_cluster_size = clusters[counter].indices.size(); 
-		 largest_cluster_location = counter; 
+		 largest_cluster_size = clusters[counter].indices.size();
+		 largest_cluster_location = counter;
 		}
   }
 	std::cout << "largest cluster= " << largest_cluster_size << " at location " << largest_cluster_location << std::endl;
@@ -203,7 +346,7 @@ cloudPtr color_segment (cloudPtr cloud)
   //pcl::visualization::CloudViewer viewer ("Cluster viewer");
   //viewer.showCloud(white_line_cluster);
 
-  return white_line_cluster;
+  return;
 }
 
 void test_view(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud){
@@ -233,9 +376,9 @@ int count_points(float startx, float stopx, float starty, float stopy, float sta
 		if (inCloud->points[i].x >= startx
 				&& inCloud->points[i].x <= stopx
 				&& inCloud->points[i].y >= starty
-				&& inCloud->points[i].y <= stopy 
+				&& inCloud->points[i].y <= stopy
 				&& inCloud->points[i].z >= startz
-				&& inCloud->points[i].z <= stopz) 
+				&& inCloud->points[i].z <= stopz)
 		{
 		  accepted_counter++;
 		}
@@ -243,14 +386,14 @@ int count_points(float startx, float stopx, float starty, float stopy, float sta
 		  denied_counter++;
 		}
 	}
-	std::cout << "points in area: " << accepted_counter
-	<< " points denied: " << denied_counter
-	<< " ratio: " << (float)accepted_counter/(float)denied_counter*100 << "%" <<std::endl;
+	//std::cout << "points in area: " << accepted_counter
+	//<< " points denied: " << denied_counter
+	//<< " ratio: " << (float)accepted_counter/(float)denied_counter*100 << "%" <<std::endl;
 	return accepted_counter;
 }
 
 //pcl::PointCloud<pcl::PointXYZRGB>::Ptr area_seg(float startx, float stopx, float starty, float stopy, float startz, float stopz, pcl::PointCloud<pcl::PointXYZRGB>::Ptr inCloud, std::string outname) {
-void area_seg(float startx, float stopx, float starty, float stopy, float startz, float stopz, pcl::PointCloud<pcl::PointXYZRGB>::Ptr inCloud, pcl::PointCloud<pcl::PointXYZRGB> &outCloud, std::string outname) {
+void area_seg(float startx, float stopx, float starty, float stopy, float startz, float stopz, pcl::PointCloud<pcl::PointXYZRGB>::Ptr &inCloud, pcl::PointCloud<pcl::PointXYZRGB> &outCloud, std::string outname) {
 
 	std::cout << "area_seg begin" << std::endl
 	<< "x, x2, y, y, z, z2:" << startx<<", " << stopx <<", " << starty <<", " << stopy <<", " << startz <<", " << stopz << std::endl;
@@ -258,15 +401,16 @@ void area_seg(float startx, float stopx, float starty, float stopy, float startz
 
 	int denied_counter = 0;
 	int accepted_counter = 0;
+	outCloud.clear();
 	if ( inCloud->points.size() <= 1) { printf("This is an error. The incloud is empty");}
 	for(int i = 0; i < inCloud->points.size(); i++) {
 
 		if (inCloud->points[i].x >= startx
 				&& inCloud->points[i].x <= stopx
 				&& inCloud->points[i].y >= starty
-				&& inCloud->points[i].y <= stopy 
+				&& inCloud->points[i].y <= stopy
 				&& inCloud->points[i].z >= startz
-				&& inCloud->points[i].z <= stopz) 
+				&& inCloud->points[i].z <= stopz)
 		{
 			//std::cout << "point accepted "<<std::endl;
 			outCloud.points.push_back(inCloud->points[i]);
@@ -279,13 +423,13 @@ void area_seg(float startx, float stopx, float starty, float stopy, float startz
 			std::cout << "points accepted: " << accepted_counter
 			 << " points denied: " << denied_counter
 			 << " ratio: " << (float)accepted_counter/(float)denied_counter*100 << "%" <<std::endl;
-	//hacks to get around width*height error 
+	//hacks to get around width*height error
 		outCloud.width = 1;
 		outCloud.height = accepted_counter;
 			std::cout << "point cloud size: " << outCloud.size() << std::endl;
 	// Save points to disk
 
-			if (outname.compare("null")){
+			if (outname.compare("null")){//if filename is not null
 				pPointFile = fopen( outname.c_str(), "w+" );
 				pcl::io::savePCDFile (outname.c_str(), outCloud);
 
@@ -319,24 +463,24 @@ float * seg_info(pcl::PointCloud<pcl::PointXYZRGB>::Ptr incloud) {
 	//for cloud
 	for(int i =0; i<incloud->points.size(); i++){
 		//get highest and lowest
-		if ( incloud->points[i].x < lowest_x) { 
-			lowest_x= incloud->points[i].x; 
+		if ( incloud->points[i].x < lowest_x) {
+			lowest_x= incloud->points[i].x;
 			info_array[0]=lowest_x; }
 		if ( incloud->points[i].x > highest_x) {
 			highest_x= incloud->points[i].x;
 			info_array[1]=highest_x; }
-		if ( incloud->points[i].y < lowest_y) { 
+		if ( incloud->points[i].y < lowest_y) {
 			lowest_y= incloud->points[i].y;
 			info_array[2]=lowest_y; }
 		if ( incloud->points[i].y > highest_y) {
-			highest_y= incloud->points[i].y; 
+			highest_y= incloud->points[i].y;
 			info_array[3]=highest_y; }
-		if ( incloud->points[i].z < lowest_z) { 
+		if ( incloud->points[i].z < lowest_z) {
 			lowest_z= incloud->points[i].z;
 			info_array[4]=lowest_z; }
 		if ( incloud->points[i].z > highest_z) {
 			highest_z= incloud->points[i].z;
-			info_array[5]=highest_z; 
+			info_array[5]=highest_z;
 		}
 	}
 	//print highest and lowest
@@ -354,7 +498,7 @@ float * seg_info(pcl::PointCloud<pcl::PointXYZRGB>::Ptr incloud) {
 
 // configue camera to capture image
 int configureCamera( FC2::Camera & camera ) {
-	FC2T::ErrorType fc2TriclopsError;	      
+	FC2T::ErrorType fc2TriclopsError;
 	FC2T::StereoCameraMode mode = FC2T::TWO_CAMERA;
     fc2TriclopsError = FC2T::setStereoMode( camera, mode );
     if ( fc2TriclopsError )
@@ -378,12 +522,12 @@ int grabImage ( FC2::Camera & camera, FC2::Image& grabbedImage ) {
 	{
 		return FC2T::handleFc2Error(fc2Error);
 	}
-	
+
 	return 0;
 }
 
 // generate Triclops context from connected camera
-int generateTriclopsContext( FC2::Camera     & camera, 
+int generateTriclopsContext( FC2::Camera     & camera,
                              TriclopsContext & triclops )
 {
 	FC2::CameraInfo camInfo;
@@ -392,15 +536,15 @@ int generateTriclopsContext( FC2::Camera     & camera,
 	{
 		return FC2T::handleFc2Error(fc2Error);
 	}
-   
-	FC2T::ErrorType fc2TriclopsError; 
+
+	FC2T::ErrorType fc2TriclopsError;
     fc2TriclopsError = FC2T::getContextFromCamera( camInfo.serialNumber, &triclops );
     if (fc2TriclopsError != FC2T::ERRORTYPE_OK)
     {
-        return FC2T::handleFc2TriclopsError(fc2TriclopsError, 
+        return FC2T::handleFc2TriclopsError(fc2TriclopsError,
 		                                    "getContextFromCamera");
     }
-	
+
 	return 0;
 }
 
@@ -423,26 +567,26 @@ int convertToBGRU( FC2::Image & image, FC2::Image & convertedImage )
 }
 
 // generate triclops input necessary to carry out stereo processing
-int generateTriclopsInput( FC2::Image const & grabbedImage, 
+int generateTriclopsInput( FC2::Image const & grabbedImage,
                             ImageContainer  & imageContainer,
                             TriclopsInput   & triclopsColorInput,
-                            TriclopsInput   & triclopsMonoInput ) 
+                            TriclopsInput   & triclopsMonoInput )
 {
     FC2::Error fc2Error;
-    FC2T::ErrorType fc2TriclopsError; 
+    FC2T::ErrorType fc2TriclopsError;
     TriclopsError te;
 
     FC2::Image * unprocessedImage = imageContainer.unprocessed;
 
     fc2TriclopsError = FC2T::unpackUnprocessedRawOrMono16Image(
-                            grabbedImage, 
+                            grabbedImage,
                             true /*assume little endian*/,
-                            unprocessedImage[RIGHT], 
+                            unprocessedImage[RIGHT],
                             unprocessedImage[LEFT]);
 
     if (fc2TriclopsError != FC2T::ERRORTYPE_OK)
     {
-        return FC2T::handleFc2TriclopsError(fc2TriclopsError, 
+        return FC2T::handleFc2TriclopsError(fc2TriclopsError,
                                      "unpackUnprocessedRawOrMono16Image");
     }
 
@@ -475,13 +619,13 @@ int generateTriclopsInput( FC2::Image const & grabbedImage,
         FC2::Image & packedColorImage = imageContainer.packed;
 
         // pack BGRU right and left image into an image
-        fc2TriclopsError = FC2T::packTwoSideBySideRgbImage( bgruImage[RIGHT], 
+        fc2TriclopsError = FC2T::packTwoSideBySideRgbImage( bgruImage[RIGHT],
                                                             bgruImage[LEFT],
                                                             packedColorImage );
 
         if (fc2TriclopsError != FC2T::ERRORTYPE_OK)
         {
-            return handleFc2TriclopsError(fc2TriclopsError, 
+            return handleFc2TriclopsError(fc2TriclopsError,
                                             "packTwoSideBySideRgbImage");
         }
 
@@ -490,8 +634,8 @@ int generateTriclopsInput( FC2::Image const & grabbedImage,
         te = triclopsBuildPackedTriclopsInput( grabbedImage.GetCols(),
                                                 grabbedImage.GetRows(),
                                                 packedColorImage.GetStride(),
-                                                (unsigned long)grabbedImage.GetTimeStamp().seconds, 
-                                                (unsigned long)grabbedImage.GetTimeStamp().microSeconds, 
+                                                (unsigned long)grabbedImage.GetTimeStamp().seconds,
+                                                (unsigned long)grabbedImage.GetTimeStamp().microSeconds,
                                                 packedColorImage.GetData(),
                                                 &triclopsColorInput );
 
@@ -500,8 +644,8 @@ int generateTriclopsInput( FC2::Image const & grabbedImage,
 
         // the following does not change the size of the image
         // and therefore it PRESERVES the internal buffer!
-        packedColorImage.SetDimensions( packedColorImage.GetRows(), 
-                                        packedColorImage.GetCols(), 
+        packedColorImage.SetDimensions( packedColorImage.GetRows(),
+                                        packedColorImage.GetCols(),
                                         packedColorImage.GetStride(),
                                         packedColorImage.GetPixelFormat(),
                                         FC2::NONE);
@@ -525,17 +669,17 @@ int generateTriclopsInput( FC2::Image const & grabbedImage,
         monoImage[RIGHT] = unprocessedImage[RIGHT];
         monoImage[LEFT] = unprocessedImage[LEFT];
     }
-   
-    // Use the row interleaved images to build up an RGB TriclopsInput.  
+
+    // Use the row interleaved images to build up an RGB TriclopsInput.
     // An RGB triclops input will contain the 3 raw images (1 from each camera).
-    te = triclopsBuildRGBTriclopsInput( grabbedImage.GetCols(), 
-                                        grabbedImage.GetRows(), 
-                                        grabbedImage.GetCols(),  
-                                        (unsigned long)grabbedImage.GetTimeStamp().seconds, 
-                                        (unsigned long)grabbedImage.GetTimeStamp().microSeconds, 
-                                        monoImage[RIGHT].GetData(), 
-                                        monoImage[LEFT].GetData(), 
-                                        monoImage[LEFT].GetData(), 
+    te = triclopsBuildRGBTriclopsInput( grabbedImage.GetCols(),
+                                        grabbedImage.GetRows(),
+                                        grabbedImage.GetCols(),
+                                        (unsigned long)grabbedImage.GetTimeStamp().seconds,
+                                        (unsigned long)grabbedImage.GetTimeStamp().microSeconds,
+                                        monoImage[RIGHT].GetData(),
+                                        monoImage[LEFT].GetData(),
+                                        monoImage[LEFT].GetData(),
                                         &triclopsMonoInput );
 
     _HANDLE_TRICLOPS_ERROR( "triclopsBuildRGBTriclopsInput()", te );
@@ -544,13 +688,13 @@ int generateTriclopsInput( FC2::Image const & grabbedImage,
 }
 
 // carry out stereo processing pipeline
-int doStereo( TriclopsContext const & triclops, 
-               TriclopsInput  const & stereoData, 
+int doStereo( TriclopsContext const & triclops,
+               TriclopsInput  const & stereoData,
                TriclopsImage16      & depthImage )
 {
     TriclopsError te;
 
-    // Set subpixel interpolation on to use 
+    // Set subpixel interpolation on to use
     // TriclopsImage16 structures when we access and save the disparity image
     te = triclopsSetSubpixelInterpolation( triclops, 1 );
     _HANDLE_TRICLOPS_ERROR( "triclopsSetSubpixelInterpolation()", te );
@@ -562,11 +706,11 @@ int doStereo( TriclopsContext const & triclops,
     // Do stereo processing
     te = triclopsStereo( triclops );
     _HANDLE_TRICLOPS_ERROR( "triclopsStereo()", te );
-   
+
     // Retrieve the interpolated depth image from the context
-    te = triclopsGetImage16( triclops, 
-                            TriImg16_DISPARITY, 
-                            TriCam_REFERENCE, 
+    te = triclopsGetImage16( triclops,
+                            TriImg16_DISPARITY,
+                            TriCam_REFERENCE,
                             &depthImage );
     _HANDLE_TRICLOPS_ERROR( "triclopsGetImage()", te );
 
@@ -579,9 +723,9 @@ int doStereo( TriclopsContext const & triclops,
 }
 
 // save 3d points generated from stereo processing
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & grabbedImage, 
-                  TriclopsContext const & triclops, 
-                  TriclopsImage16 const & disparityImage16, 
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & grabbedImage,
+                  TriclopsContext const & triclops,
+                  TriclopsImage16 const & disparityImage16,
                   TriclopsInput   const & colorData,
                   std::string outname)
 {
@@ -590,7 +734,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & gra
     TriclopsColorImage colorImage = {0};
     TriclopsError te;
 
-    float            x, y, z; 
+    float            x, y, z;
     int	            r, g, b;
     FILE             * pPointFile;
     int              nPoints = 0;
@@ -604,9 +748,9 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & gra
     if ( grabbedImage.GetPixelFormat() == FC2::PIXEL_FORMAT_RAW16 )
     {
         isColor = true;
-        te = triclopsRectifyColorImage( triclops, 
-                                        TriCam_REFERENCE, 
-	                                    const_cast<TriclopsInput *>(&colorData), 
+        te = triclopsRectifyColorImage( triclops,
+                                        TriCam_REFERENCE,
+	                                    const_cast<TriclopsInput *>(&colorData),
 	                                    &colorImage );
         _HANDLE_TRICLOPS_ERROR( "triclopsRectifyColorImage()", te );
     }
@@ -619,7 +763,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & gra
         _HANDLE_TRICLOPS_ERROR( "triclopsGetImage()", te );
     }
 
-  
+
     // Save points to disk
     pPointFile = fopen( outname.c_str(), "w+" );
     if ( pPointFile == NULL )
@@ -654,7 +798,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & gra
                     {
                         r = (int)colorImage.red[k];
                         g = (int)colorImage.green[k];
-                        b = (int)colorImage.blue[k];		  
+                        b = (int)colorImage.blue[k];
                     }
                     else
                     {
