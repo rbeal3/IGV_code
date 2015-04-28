@@ -11,8 +11,6 @@ segmenters.h
 /home/igv/Desktop/IGV_code-master/basicPathing/segmenters.h
 
 /home/igv/Desktop/IGV_code-master/basicPathing/segmenters.h
-fc2triclops.h
-/home/igv/Desktop/IGV_code-master/basicPathing/fc2triclops.h
 triclops.h
 /home/igv/Desktop/IGV_code-master/basicPathing/triclops.h
 boost/thread/thread.hpp
@@ -21,6 +19,8 @@ cmath
 -
 fstream
 -
+fc2triclops.h
+/home/igv/Desktop/IGV_code-master/basicPathing/fc2triclops.h
 iostream
 -
 pcl/ModelCoefficients.h
