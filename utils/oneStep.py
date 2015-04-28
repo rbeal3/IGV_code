@@ -9,8 +9,8 @@ import sys
 SLAVE = '192.168.1.2'
 PORT = 23
 
-# python oneStep.py 1 #will go forward 2 feet
-# python oneStep.py -r 2 # will turn right 180 degrees
+# python oneStep.py 1 #will go forward 1/10 foot
+# python oneStep.py -r 2 # will turn right 2 degrees
 # 
 #
 #
@@ -35,10 +35,10 @@ def main(argv):
 		sock.close()
 		sys.exit(1) 
 	print "Successfully connected, initializing acceleration variables"
-	cmd = 'AC 0,0,0,0,50000,50000;\r'
+	cmd = 'AC 0,0,0,0,10000,10000;\r'
 	print cmd
 	sock.sendall(cmd)
-	cmd = 'DC 0,0,0,0,50000,50000;\r'
+	cmd = 'DC 0,0,0,0,10000,10000;\r'
 	print cmd
 	sock.sendall(cmd)
 	cmd = 'OE 0,0,0,0,1,1,0,0;\r'#error fail ON
@@ -57,14 +57,13 @@ def main(argv):
 		print "you need to include a turn distance -i for inverse direction"
 		return 0;
 
-	turnAmount=args[0]*25000
-	distance=args[0]*26500
+	turnAmount=str(int(args[0])*25000/90)
+	distance=str(int(args[0])*26500/10)
 	cmd = 'PR 0,0,0,0,'+distance+','+distance+';\r'
 
 	print "distance =" + distance
 	print "the command will be:"
 	print cmd
-	time.sleep(5)
 
 	for o, a in opts:
 		if o in ("-r"): #right turn
@@ -75,17 +74,14 @@ def main(argv):
 			cmd = 'PR 0,0,0,0,'+turnAmount+',-'+turnAmount+';\r'
 		
 		#do something with 
-	sock.sendall(cmd)
-	data = sock.recv(1024)
 	print "turn command sent:"
 	print cmd
-	print data
+	sock.sendall(cmd)
 	cmd = 'BG;\r'
 	sock.sendall(cmd)
-	data = sock.recv(1024)
 	time.sleep(0.1)
 
-	print "command sent: (hopefully BG)"
+	print "command sent:"
 	print cmd
 
 #code to bot above this
