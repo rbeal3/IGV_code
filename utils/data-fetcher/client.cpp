@@ -32,7 +32,7 @@ main(int argc, char *argv[])
 		host = argv[1];
 		port = argv[2];
 		file_path = argv[3] + '\0';
-		if( argc == 5 &&  (strcmp(argv[4], "-d") == 0) ) debug = true;
+		//if( argc == 5 &&  (strcmp(argv[4], "-d") == 0) ) debug = true;
 	}
 	else
 	{

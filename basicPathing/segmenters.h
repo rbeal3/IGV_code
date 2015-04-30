@@ -1,24 +1,25 @@
-
+#include "fc2triclops.h"
 #include "triclops.h"
 #include <boost/thread/thread.hpp>
 #include <cmath>
 #include <fstream>
-
-#include "fc2triclops.h"
 #include <iostream>
 #include <pcl/ModelCoefficients.h>
 #include <pcl/common/common_headers.h>
 #include <pcl/console/parse.h>
 #include <pcl/features/normal_3d.h>
+#include <pcl/filters/extract_indices.h>
 #include <pcl/filters/passthrough.h>
+#include <pcl/filters/voxel_grid.h>
 #include <pcl/io/io.h>
 #include <pcl/io/pcd_io.h>
-#include <pcl/point_types.h>
+#include <pcl/kdtree/kdtree.h>
 #include <pcl/point_types.h>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/search/kdtree.h>
 #include <pcl/search/search.h>
+#include <pcl/segmentation/extract_clusters.h>
 #include <pcl/segmentation/region_growing_rgb.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/visualization/cloud_viewer.h>
@@ -34,6 +35,7 @@ namespace FC2 = FlyCapture2;
 namespace FC2T = Fc2Triclops;
 
 typedef pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudPtr;
+typedef pcl::PointCloud<pcl::PointXYZRGB> Cloud;
 
 enum REGULAR_OPERATIONS {
 	CENTER= 0, LEFT =1, RIGHT, NONE, VISION, GPS
@@ -96,9 +98,13 @@ struct Robot{
 	public:
 		//static Robot * instance;
 		Robot(){
-				//instance = new Robot();
-				method=GPS;
-				checkDirection=CENTER;
+			//instance = new Robot();
+			method=GPS;
+			checkDirection=CENTER;
+			checking=0;
+			check_result=0;
+			checkDirection=CENTER;
+			goal_num=0;
 		}
 		Robot(const Robot & source){}//disabling copy constructor
 		//Robot_singleton(const Robot_singleton && source){}//disabling move constructor
@@ -107,14 +113,18 @@ struct Robot{
 
 		int method;
 		int checkDirection;
+		int checking;
+		int check_result;
 		float goalBearing;
 		float goalDistance;
+		float prevGoalDistance;
 		float bearing;
 		float latitude;
 		float longitude;
 		int goal_num;
 		double goal_lat[10];
 		double goal_long [10];
+		int Map[200*100*10];
 
 		//Robot * getInstance() {
 			//if (instance ==NULL){ }
@@ -128,9 +138,11 @@ void set_goals(Robot* robot){
 	if (gpsGoals.is_open()) {
 		int goals=0;
 		//get number of goals
-		while (std::getline(gpsGoals,str)) {
+		 do {
+			std::getline(gpsGoals,str);
 			goals++;
-		}
+		}while (strcmp(str.c_str(), "#"));//do until # found
+		 
 		goals/=3;//3 lines per single entry
 		robot->goal_num=goals;
 
@@ -155,6 +167,53 @@ void set_goals(Robot* robot){
 			std::cout << "lat: " << goal_lat[i] << std::endl;
 			std::cout << "lon: " << goal_long[i] << std::endl;
 		}*/
+
+}
+
+float saveAnd_condense_object(Robot* robot, Cloud* inCloud){
+	float long_diff, lat_diff;
+	float dist_to_hazard,  bear_to_hazard;
+	float x_ave=0, y_ave=0, z_ave=0;
+	float x_sum=0, y_sum=0, z_sum=0;
+	//return array
+	float info_array[5];
+	for(int i = 0; i < inCloud->points.size(); i++) {
+		//sum the cloud 
+		x_sum += inCloud->points[i].x;
+		z_sum += inCloud->points[i].z;
+		inCloud->points[i].y=0;
+		//be aware, one may have overlapping points!!!!!!!!
+	}
+
+	//Average the cloud
+	//Y is not included since the map will be flat
+	x_ave = x_sum / inCloud->points.size();
+	z_ave = z_sum / inCloud->points.size();
+
+	std::cout << " x_ave "<< x_ave << std::endl;
+	std::cout << " z_ave "<< z_ave << std::endl;
+
+	//Determine absolute bearing of object
+	float angular_diff = atan(x_ave/z_ave)*180/M_PI;//opposite/adj
+ 	if (x_ave > 0)
+		bear_to_hazard= (robot->bearing+angular_diff);
+		if (bear_to_hazard>360) bear_to_hazard-=360;
+	else{
+		bear_to_hazard= robot->bearing-angular_diff;
+		if (bear_to_hazard<0) bear_to_hazard+=360;
+	}
+	dist_to_hazard= pow(x_ave*x_ave + z_ave*z_ave, 0.5);//Thanks Pythagoras
+
+	//Determing GPS shift of object
+		lat_diff = cos(bear_to_hazard)*dist_to_hazard;
+		long_diff = sin(bear_to_hazard)*dist_to_hazard;
+	//Determine coordinate of object
+		
+	info_array[0] = robot->latitude - lat_diff;
+	info_array[1] = robot->longitude + long_diff;
+	info_array[2] = dist_to_hazard; 
+	info_array[3] = bear_to_hazard;
+	return *info_array;
 
 }
 
@@ -208,6 +267,164 @@ void update_gps(Robot* robot){
 	return;
 }
 
+std::vector<pcl::PointCloud<pcl::PointXYZRGB>* > noiseFilter(cloudPtr cloud) {
+
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_f (new pcl::PointCloud<pcl::PointXYZRGB>);
+  // Create the filtering object: downsample the dataset using a leaf size of 1cm
+  pcl::VoxelGrid<pcl::PointXYZRGB> vg;
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
+  vg.setInputCloud (cloud);
+  vg.setLeafSize (0.01f, 0.01f, 0.01f);
+  vg.filter (*cloud_filtered);
+  std::cout << "PointCloud after filtering has: " << cloud_filtered->points.size ()  << " data points." << std::endl; //*
+
+  // Create the segmentation object for the planar model and set all the parameters
+  pcl::SACSegmentation<pcl::PointXYZRGB> seg;
+  pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+  pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_plane (new pcl::PointCloud<pcl::PointXYZRGB> ());
+  pcl::PCDWriter writer;
+  seg.setOptimizeCoefficients (true);
+  seg.setModelType (pcl::SACMODEL_PLANE);
+  seg.setMethodType (pcl::SAC_RANSAC);
+  seg.setMaxIterations (100);
+  seg.setDistanceThreshold (0.021);
+
+  int i=0, nr_points = (int) cloud_filtered->points.size ();
+  while (cloud_filtered->points.size () > 0.3 * nr_points)
+  {
+    // Segment the largest planar component from the remaining cloud
+    seg.setInputCloud (cloud_filtered);
+    seg.segment (*inliers, *coefficients);
+    if (inliers->indices.size () == 0)
+    {
+      std::cout << "Could not estimate a planar model for the given dataset." << std::endl;
+      break;
+    }
+
+    // Extract the planar inliers from the input cloud
+    pcl::ExtractIndices<pcl::PointXYZRGB> extract;
+    extract.setInputCloud (cloud_filtered);
+    extract.setIndices (inliers);
+    extract.setNegative (false);
+
+    // Get the points associated with the planar surface
+    extract.filter (*cloud_plane);
+    //std::cout << "PointCloud representing the planar component: " << cloud_plane->points.size () << " data points." << std::endl;
+
+    // Remove the planar inliers, extract the rest
+    extract.setNegative (true);
+    extract.filter (*cloud_f);
+    *cloud_filtered = *cloud_f;
+  }
+
+  // Creating the KdTree object for the search method of the extraction
+  pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZRGB>);
+  tree->setInputCloud (cloud_filtered);
+
+  std::vector<pcl::PointIndices> cluster_indices;
+  pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ec;
+  ec.setClusterTolerance (0.08); // 2cm
+  ec.setMinClusterSize (10);
+  ec.setMaxClusterSize (2500);
+  ec.setSearchMethod (tree);
+  ec.setInputCloud (cloud_filtered);
+  ec.extract (cluster_indices);
+
+	std::vector<pcl::PointCloud<pcl::PointXYZRGB>* > cluster_extract;
+  for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin (); it != cluster_indices.end (); ++it)
+  {
+    pcl::PointCloud<pcl::PointXYZRGB>* cloud_cluster =(new pcl::PointCloud<pcl::PointXYZRGB>);
+    for (std::vector<int>::const_iterator pit = it->indices.begin (); pit != it->indices.end (); ++pit)
+      cloud_cluster->points.push_back (cloud_filtered->points[*pit]); //*
+    cloud_cluster->width = cloud_cluster->points.size ();
+    cloud_cluster->height = 1;
+    cloud_cluster->is_dense = true;
+
+    std::cout << "PointCloud representing the Cluster: " << cloud_cluster->points.size () << " data points." << std::endl;
+		cluster_extract.push_back(cloud_cluster);
+  }
+	return cluster_extract;
+}
+std::vector<pcl::PointCloud<pcl::PointXYZRGB>* > regionSeg(cloudPtr cloud) {
+
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_f (new pcl::PointCloud<pcl::PointXYZRGB>);
+  // Create the filtering object: downsample the dataset using a leaf size of 1cm
+  pcl::VoxelGrid<pcl::PointXYZRGB> vg;
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
+  vg.setInputCloud (cloud);
+  vg.setLeafSize (0.005f, 0.005f, 0.005f);
+  vg.filter (*cloud_filtered);
+  std::cout << "PointCloud after filtering has: " << cloud_filtered->points.size ()  << " data points." << std::endl; //*
+
+  // Create the segmentation object for the planar model and set all the parameters
+  pcl::SACSegmentation<pcl::PointXYZRGB> seg;
+  pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+  pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_plane (new pcl::PointCloud<pcl::PointXYZRGB> ());
+  pcl::PCDWriter writer;
+  seg.setOptimizeCoefficients (true);
+  seg.setModelType (pcl::SACMODEL_PLANE);
+  seg.setMethodType (pcl::SAC_RANSAC);
+  seg.setMaxIterations (100);
+  seg.setDistanceThreshold (0.001);
+
+  int i=0, nr_points = (int) cloud_filtered->points.size ();
+  while (cloud_filtered->points.size () > 0.3 * nr_points)
+  {
+    // Segment the largest planar component from the remaining cloud
+    seg.setInputCloud (cloud_filtered);
+    seg.segment (*inliers, *coefficients);
+    if (inliers->indices.size () == 0)
+    {
+      std::cout << "Could not estimate a planar model for the given dataset." << std::endl;
+      break;
+    }
+
+    // Extract the planar inliers from the input cloud
+    pcl::ExtractIndices<pcl::PointXYZRGB> extract;
+    extract.setInputCloud (cloud_filtered);
+    extract.setIndices (inliers);
+    extract.setNegative (false);
+
+    // Get the points associated with the planar surface
+    extract.filter (*cloud_plane);
+    //std::cout << "PointCloud representing the planar component: " << cloud_plane->points.size () << " data points." << std::endl;
+
+    // Remove the planar inliers, extract the rest
+    extract.setNegative (true);
+    extract.filter (*cloud_f);
+    *cloud_filtered = *cloud_f;
+  }
+
+  // Creating the KdTree object for the search method of the extraction
+  pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZRGB>);
+  tree->setInputCloud (cloud_filtered);
+
+  std::vector<pcl::PointIndices> cluster_indices;
+  pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ec;
+  ec.setClusterTolerance (0.08); // 2cm
+  ec.setMinClusterSize (300);
+  ec.setMaxClusterSize (25000);
+  ec.setSearchMethod (tree);
+  ec.setInputCloud (cloud_filtered);
+  ec.extract (cluster_indices);
+
+std::vector<pcl::PointCloud<pcl::PointXYZRGB>* > cluster_extract;
+  for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin (); it != cluster_indices.end (); ++it)
+  {
+    pcl::PointCloud<pcl::PointXYZRGB>* cloud_cluster =(new pcl::PointCloud<pcl::PointXYZRGB>);
+    for (std::vector<int>::const_iterator pit = it->indices.begin (); pit != it->indices.end (); ++pit)
+      cloud_cluster->points.push_back (cloud_filtered->points[*pit]); //*
+    cloud_cluster->width = cloud_cluster->points.size ();
+    cloud_cluster->height = 1;
+    cloud_cluster->is_dense = true;
+
+    std::cout << "PointCloud representing the Cluster: " << cloud_cluster->points.size () << " data points." << std::endl;
+		cluster_extract.push_back(cloud_cluster);
+  }
+	return cluster_extract;
+}
 cloudPtr plainSeg(cloudPtr cloud)
 {
   pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
@@ -401,8 +618,10 @@ void area_seg(float startx, float stopx, float starty, float stopy, float startz
 
 	int denied_counter = 0;
 	int accepted_counter = 0;
-	outCloud.clear();
-	if ( inCloud->points.size() <= 1) { printf("This is an error. The incloud is empty");}
+	 printf("the outcloud is %d\n",outCloud.points.size());
+	if (outCloud.size()>0)
+		outCloud.clear();
+	if ( inCloud->points.size() <= 1) { printf("This is an error. The incloud is empty\n"); return;}
 	for(int i = 0; i < inCloud->points.size(); i++) {
 
 		if (inCloud->points[i].x >= startx
