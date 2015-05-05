@@ -1,8 +1,10 @@
-#include "fc2triclops.h"
+
 #include "triclops.h"
 #include <boost/thread/thread.hpp>
 #include <cmath>
 #include <fstream>
+
+#include "fc2triclops.h"
 #include <iostream>
 #include <pcl/ModelCoefficients.h>
 #include <pcl/common/common_headers.h>
@@ -141,7 +143,6 @@ void set_goals(Robot* robot){
 			std::getline(gpsGoals,str);
 			goals++;
 		}while (strcmp(str.c_str(), "#"));//do until # found
-		 
 		goals/=3;//3 lines per single entry
 		robot->goal_num=goals;
 
@@ -183,6 +184,56 @@ float saveAnd_condense_object(Robot* robot, Cloud* inCloud){
 		inCloud->points[i].y=0;
 		//be aware, one may have overlapping points!!!!!!!!
 	}
+
+void update_gps(Robot* robot){
+	//get singleton robot object to modify
+	std::string  str;
+	std::string command = "./client 192.168.1.102 8000 /home/pi/IGV/GPS/gpsData.txt";
+		system(command.c_str());
+
+	std::ifstream gpsData("gpsData.txt");
+
+	double * m_position = new double [6];
+	
+
+	if (gpsData.is_open()) {
+		for(int info=0; info < 5; info++){
+			getline(gpsData, str);
+			str.erase(0, str.find("=")+1);
+			m_position[info] = atof(str.c_str());
+		}
+	}
+	else{
+		std::cout << "Error: No GPS file found!"  << std::endl;
+	}
+	
+	///*Debug
+		for(int i=0; i<5; i++){
+			std::cout << "position Info " << m_position[i] << std::endl;
+		} //*/
+		double x_diff = m_position[1] - robot->goal_lat[robot->goal_num]; //difference is positive if goal is west
+		double y_diff = robot->goal_long[robot->goal_num] - m_position[2]; //difference is positive if north
+
+	//set bearing
+
+		double correctBearing, Theta = atan2(y_diff, x_diff)*180/M_PI; 
+		if (Theta <= 0){
+			correctBearing = (Theta * -1) + 90;
+		}
+		else if (Theta > 90) {
+			Theta -= 90;
+			correctBearing = 360 - Theta;
+		}
+		else {//theta 
+			correctBearing = 90-Theta;
+		}
+		robot->goalDistance=pow((pow(x_diff,2)+pow(y_diff,2)), 0.5 );
+		robot->bearing = m_position[4];
+		robot->goalBearing = correctBearing;
+		robot->latitude = m_position[0];
+		robot->longitude = m_position[1];
+	return;
+}
 
 	//Average the cloud
 	//Y is not included since the map will be flat
@@ -496,6 +547,21 @@ cloudPtr plainSeg(cloudPtr cloud)
 			printf("erasing pointk");
 			cloud->points.erase(pit);
 		}
+	}
+		printf("Colors filtered\n");
+}
+	//pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (outCloud);
+
+	/*
+	for ( std::vector<pcl::PointXYZRGB>::iterator pit = cloud->points.begin(); pit != cloud->points.end(); ++pit){
+		//std::cout <<  cloud->points[i].r << " " << cloud->points[i].g << " " << cloud->points[i].b << std::endl;
+		//printf("r:%c g:%c b:%c\n" , cloud->points[i].r, cloud->points[i].g, cloud->points[i].b );
+		if ( cloud->points[*pit].r<200)//  cloud->points[i].g, cloud->points[i].b );
+		{
+			printf("erasing pointk");
+			cloud->points.erase(pit);
+		}
+	}
 	*/
 void color_segment (cloudPtr cloud, pcl::PointCloud<pcl::PointXYZRGB> &whiteCloud, pcl::PointCloud<pcl::PointXYZRGB> &redCloud, pcl::PointCloud<pcl::PointXYZRGB> &blueCloud)
 {
