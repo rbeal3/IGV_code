@@ -30,8 +30,8 @@ int main( int argc, char**  argv)
 	set_goals(robot);
 
 	std::cout << "Initial gps: "  << std::endl;
-	inspect_robot(robot);
 		pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>() );
+		pcl::PointCloud<pcl::PointXYZRGB>::Ptr floor_segment;
 		pcl::PointCloud<pcl::PointXYZRGB> inCloud= *cloud;
 		pcl::PointCloud<pcl::PointXYZRGB> *cloud_cut= new pcl::PointCloud<pcl::PointXYZRGB> ;
 		pcl::PointCloud<pcl::PointXYZRGB> *whiteCloud= new pcl::PointCloud<pcl::PointXYZRGB> ;
@@ -56,7 +56,7 @@ int main( int argc, char**  argv)
 			//here we may want to ignore data sets that have objects very close to the camera
 			//as they may contain significant noise.
 
-			area_seg(-5,5,.15,5,-5,5,cloud, *cloud_cut, "null");
+			cloud_cut = area_seg(-5,5,.15,5,-5,5,cloud);
 			pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_ptr(cloud_cut);
 			if (debug){
 				std::cout << "initial area_seg" << std::endl;
@@ -71,7 +71,7 @@ int main( int argc, char**  argv)
 				test_view(floor_segment);
 			}
 
-			color_filter(floor_segment, whiteCloud, redCloud, blueCloud);
+			whiteCloud= color_filter(floor_segment, redCloud, blueCloud);
 			cloudPtr whiteCloudPtr(whiteCloud);
 			if (debug||debug_short){
 				std::cout << "color segment: attempting to retrieve line segment" << std::endl;
@@ -80,15 +80,15 @@ int main( int argc, char**  argv)
 			//filter out noise
 			extracted_line_hazards = noiseFilter(whiteCloudPtr);
 			if (debug){
-				for (int i=0; i < extracted_hazards.size(); i++){
+				for (int i= 0; i < extracted_hazards.size(); i++){
 					std::cout << "lines["<< i <<"]!" << std::endl;
-					cloud_ptr=extracted_line_hazards[i]->makeShared();
+					cloud_ptr= extracted_line_hazards[i]->makeShared();
 					test_view(cloud_ptr);
 				}
 			}
 
 			//now for the cans
-			area_seg(-5,5,-5,.2,-5,5,cloud, *cloud_cut, "null");
+			cloud_cut = area_seg(-5,5,-5,.2,-5,5,cloud);
 			cloud_ptr= cloud_cut->makeShared();
 			if (debug){
 				std::cout << "initial area_seg" << std::endl;
@@ -135,7 +135,9 @@ int main( int argc, char**  argv)
 		while(!at_goal(robot)){
 			std::string command = "../bb2cloud/bb2cloud working_image.pcd";
 			std::cout << "running sterlings camera " << std::endl;
-			system(command.c_str());
+			int ret_value;
+			ret_value = system(command.c_str());
+			std::cout << "sterlings code returned: "<< ret_value << std::endl;
 
 			std::cout << std::endl;
 			std::cout << "pulling cloud from file instead of camera" << std::endl;
@@ -152,39 +154,45 @@ int main( int argc, char**  argv)
 			//as they may contain significant noise.
 
 
-			area_seg(-5,5,.15,5,-5,5,cloud, *cloud_cut, "null");
+			cloud_cut = area_seg(-5,5,.15,5,-5,5,cloud);
 			pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_ptr(cloud_cut);
 			if (debug){
 				std::cout << "initial area_seg viewer loading" << std::endl;
 				test_view(cloud_ptr);
 			}
+//SEG FAULT seg fault just below...
+			//pcl::PointCloud<pcl::PointXYZRGB>::Ptr floor_segment;//moved cause segFault 
 
-			pcl::PointCloud<pcl::PointXYZRGB>::Ptr floor_segment;
 			floor_segment = plainSeg(cloud_ptr);
+			std::cout<<"cloud_ptr Size " << cloud_ptr->size()<<std::endl;
+			std::cout<<"floorSeg Size " << floor_segment->size()<<std::endl;
 
 			if (debug){
 				std::cout << "planar segmentation" << std::endl;
 				test_view(floor_segment);
 			}
-
-			color_filter(floor_segment, whiteCloud, redCloud, blueCloud);
+		/* if (whiteCloud->size() > 0){ 
+				for ( pcl::PointCloud<pcl::PointXYZRGB>::iterator pit = whiteCloud->points.begin(); pit != whiteCloud->points.end(); ++pit){
+						whiteCloud->points.erase(pit); } //whiteCloud->clear(); } */
+			whiteCloud = color_filter(floor_segment, redCloud, blueCloud);
 			cloudPtr whiteCloudPtr(whiteCloud);
 			if (debug||debug_short){
 				std::cout << "color segment: attempting to retrieve line segment" << std::endl;
 				test_view(whiteCloudPtr);
 			}
-
-			//filter out noise
-			extracted_line_hazards = noiseFilter(whiteCloudPtr);
-			if (debug){
-				for (int i=0; i < extracted_hazards.size(); i++){
-					std::cout << "lines["<< i <<"]!" << std::endl;
-					cloud_ptr=extracted_line_hazards[i]->makeShared();
-					test_view(cloud_ptr);
+			if (whiteCloud->points.size()!=0) { 
+				//filter out noise
+				extracted_line_hazards = noiseFilter(whiteCloudPtr);
+				if (debug){
+					for (int i=0; i < extracted_hazards.size(); i++){
+						std::cout << "lines["<< i <<"]!" << std::endl;
+						cloud_ptr=extracted_line_hazards[i]->makeShared();
+						test_view(cloud_ptr);
+					}
 				}
 			}
 			//now for the cans
-			area_seg(-5,5,-5,.2,-5,5,cloud, *cloud_cut, "null");
+			cloud_cut = area_seg(-5,5,-5,.2,-5,5,cloud);
 			cloud_ptr=cloud_cut->makeShared();
 			if (debug){
 				std::cout << "initial area_seg" << std::endl;
@@ -201,9 +209,14 @@ int main( int argc, char**  argv)
 				}
 			}
 			//compile hazards
+			hazardCloud->clear();
 			for (int i=0; i < extracted_hazards.size(); i++){
 				*hazardCloud += *extracted_hazards[i];
 			}
+//SEG FAULT seg fault just below...
+			//if there is no hazard... watch out...
+			std::cout<<"hazardCloud Size" << hazardCloud->size()<<std::endl;
+			std::cout<<"whiteCloud Size" << whiteCloud->size()<<std::endl;
 			*hazardCloud+= *whiteCloud;
 			cloud_ptr = hazardCloud->makeShared();
 
@@ -218,64 +231,73 @@ int main( int argc, char**  argv)
 		}
 	}
 	else{
-		TriclopsContext triclops;
-		FC2::Camera camera;
-		string outname = "out";//outname = argv[1];
 
-		//setup
-		TriclopsInput triclopsColorInput, triclopsMonoInput;
-		//TriclopsContext triclops;//now decalared above for scope purposes
-		//FC2::Camera camera;
-		FC2::Image grabbedImage;
+    TriclopsInput triclopsColorInput, triclopsMonoInput;
+    TriclopsContext triclops;
+    FC2::Camera camera;
+    FC2::Image grabbedImage;
+    camera.Connect();
 
-		camera.Connect();
+    // configure camera
+    if ( configureCamera( camera ) ) {
+			std::cout << "ERROR with configure camera. exiting"<<std::endl;
+			return EXIT_FAILURE;
+    }
 
-		// configure camera
-		if ( configureCamera( camera ) ) {
-			return EXIT_FAILURE; }
+    // generate the Triclops context 
+    if ( generateTriclopsContext( camera, triclops ) ) {
+			std::cout << "ERROR with generate context. exiting"<<std::endl;
+			return EXIT_FAILURE;
+    }
+			// Container of Images used for processing
+			ImageContainer imageContainer;
 
-		// generate the Triclops context
-		if ( generateTriclopsContext( camera, triclops ) ) {
-			return EXIT_FAILURE; }
+    // grab image from camera.
+    // this image contains both right and left images
+		while(!at_goal(robot)){
+			if ( grabImage( camera, grabbedImage ) ) {
+				std::cout << "ERROR with grab Image. exiting"<<std::endl;
+				return EXIT_FAILURE;
+			}
 
-		//MAIN PATHING LOOP
-		int i =0;
-		//while(++i<10)//!at_goal())// Not at GPS point?
-		// grab image from camera.
-		// this image contains both right and left images
-		if ( grabImage( camera, grabbedImage ) ) {
-			return EXIT_FAILURE; }
 
-		ImageContainer imageContainer;
+			// generate triclops inputs from grabbed image
+			if ( generateTriclopsInput( grabbedImage, 
+																	imageContainer,
+																	triclopsColorInput, 
+																	triclopsMonoInput ) 
+				 )
+			{
+			std::cout << "ERROR with camera:gTI exiting"<<std::endl;
+			return EXIT_FAILURE;
+			}
 
-		// generate triclops inputs from grabbed image
-		if ( generateTriclopsInput( grabbedImage, imageContainer, triclopsColorInput, triclopsMonoInput ) ) {
-			return EXIT_FAILURE; }
+			// output image disparity image with subpixel interpolation
+			TriclopsImage16 disparityImage16;
 
-		// output image disparity image with subpixel interpolation
-		TriclopsImage16 disparityImage16;
+			// carry out the stereo pipeline 
+			if ( doStereo( triclops, triclopsMonoInput, disparityImage16 ) ) { std::cout << "ERROR with stereo pipeline. exiting"<<std::endl;
+			return EXIT_FAILURE;
+			}
 
-		// carry out the stereo pipeline
-		if ( doStereo( triclops, triclopsMonoInput, disparityImage16 ) ) {
-			return EXIT_FAILURE; }
+			// save text file containing 3d points
+				save3dPoints( grabbedImage, triclops, disparityImage16, triclopsColorInput);
+			if (0) {
+				std::cout << "ERROR with compiling image. exiting"<<std::endl;
+				return EXIT_FAILURE;
+			}
+		}
 
-		// save text file containing 3d points
-		pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud = save3dPoints( grabbedImage, triclops, disparityImage16, triclopsColorInput, outname ) ;
-		if (!cloud ) {
-			return EXIT_FAILURE; }
+	// Close the camera and disconnect
+	camera.StopCapture();
+	camera.Disconnect();
+ 
+	// Destroy the Triclops context
+	TriclopsError te;
+	te = triclopsDestroyContext( triclops ) ;
+	_HANDLE_TRICLOPS_ERROR( "triclopsDestroyContext()", te );
 
-		compute_step(cloud, robot);
-
-		// Close the camera and disconnect
-		camera.StopCapture();
-		camera.Disconnect();
-
-		// Destroy the Triclops context
-		TriclopsError te;
-		te = triclopsDestroyContext( triclops ) ;
-		_HANDLE_TRICLOPS_ERROR( "triclopsDestroyContext()", te );
 	}
-
 	return 0;
 }
 
@@ -359,6 +381,55 @@ int at_goal(Robot* robot){
 		return 0;
 	}
 }
+int gps_simple(cloudPtr cloud, Robot* robot){
+	std::string command ;
+	int left=1, center=1, right=1, smallest=CENTER;
+	do{
+		update_gps(robot);
+		if(robot->longitude=0) return 1;
+		std::cout << "My Bearing: "<<robot->bearing << std::endl
+			<< "Goal Bearing: "<< robot->goalBearing  << std::endl;
+
+		//Build the move command starting here
+			command = "python ../utils/oneStep.py ";
+
+			checkHazard(cloud, 1.4, left, center, right);
+			//turn towards GPS by default
+				float diff = abs(int(robot->bearing-robot->goalBearing));
+				if ((360>diff && diff >180) || (0 > diff && diff>-180)){
+					stringstream ss;
+					ss << diff;
+					string arg2 = ss.str();
+					command += "-r ";
+					command += arg2;
+					 robot->bearing = int(robot->bearing+diff)%360;
+				}
+				else if((180> diff && diff>0) || (-180> diff && diff>-360)){
+					stringstream ss;
+					ss << diff;
+					string arg2 = ss.str();
+					command += "-l ";
+					command += arg2;
+					robot->bearing = robot->bearing -diff;
+					if (robot->bearing< 0)
+					 robot->bearing = 360+robot->bearing;
+				}
+				else if ((diff>-10 || diff<10) && center==0){
+					command += "40 ";
+				}
+			std::cout << "diff: "<< diff << std::endl;
+			std::cout << "gps wants "<<command << std::endl;
+			if (testing){
+				std::cout << "(enter y to comply)"<<command << std::endl;
+				char str;
+				std::cin>> str;
+			}
+			system(command.c_str());
+	}while(center==0 || abs(robot->bearing - robot->goalBearing) >10);
+
+	robot->method=VISION;
+	return 0;
+}
 int gps_target(cloudPtr cloud, Robot* robot){
 	std::string command ;
 	int left=1, center=1, right=1, smallest=CENTER;
@@ -393,13 +464,19 @@ int gps_target(cloudPtr cloud, Robot* robot){
 				else if ((diff>-10 || diff<10) && center==0){
 					command += "40 ";
 				}
-			std::cout << "gps wants"<<command << std::endl;
+			std::cout << "diff: "<< diff << std::endl;
+			std::cout << "gps wants "<<command << std::endl;
 			if (testing){
 				std::cout << "(enter y to comply)"<<command << std::endl;
 				char str;
 				std::cin>> str;
+				if (str=='y'){
+				system(command.c_str());
+				}
 			}
-			system(command.c_str());
+			else{
+				system(command.c_str());
+			}
 	}while(center==0 || abs(robot->bearing - robot->goalBearing) >10);
 
 	//if clear blocked, turn towards open vision
@@ -419,13 +496,77 @@ int gps_target(cloudPtr cloud, Robot* robot){
 			std::cout << " enter y to comply "<<std::endl;
 				char str;
 				std::cin>> str;
+				if (str=='y'){
+				system(command.c_str());
+				}
 	}
-		system(command.c_str());
+		else{
+			system(command.c_str());
+		}
 
 	robot->method=VISION;
 	return 0;
 }
 
+void vision_simple(cloudPtr cloud, Robot* robot){
+	
+	//assume we are just here to avoid an object
+	//assume further that we have already turned,
+
+	int center_near = count_points(-.5, .5, -5, 3, 0, 1, cloud);
+	int center_med = count_points(-.5, .5, -5, 3, 0, 2, cloud);
+	int center_far = count_points(-.5, .5, -5, 3, 0, 3, cloud);
+
+	std::cout << "center_near " << center_near
+	<< "center_med " << center_med
+	<< "center_far " << center_far << std::endl;
+		if(debug)
+			test_view(cloud);
+
+		std::string command = "";
+		//checking assumes we have turned and gotten a new pic 
+		 if(center_far<200) { //center clear
+		 command = "python ../utils/oneStep.py 90 ";
+    }
+		else if(center_med<200) { //center clear
+		 command = "python ../utils/oneStep.py 60 ";
+    }
+		else if(center_near<200) { //center clear
+		 command = "python ../utils/oneStep.py 30 ";
+    }
+		else {
+		 command = "python ../utils/oneStep.py -l 30 ";
+		 //I would like to do a few more iterations before switching to gps
+			robot->method=GPS;
+		}
+
+		std::cout << "going to move "<<command << std::endl;
+	if (testing){
+		std::cout << "Enter y if this is ok"<<std::endl;
+		char ok;
+		std::cin >> ok;
+		if (ok=='y'){
+			system(command.c_str());
+		}
+		if (ok=='c'){
+		 command = "python ../utils/oneStep.py 30 ";
+			system(command.c_str());
+		 command = "python ../utils/oneStep.py -r 30 ";
+			system(command.c_str());
+		}
+		else{
+			stringstream ss;
+			ss << TroubleCounter;
+			string tc = ss.str();
+			//copy cloud to troubleshooting folder
+			command="cp working_image.pcd log/working_image"+tc+".pcd ";
+		}
+	}
+	else{
+			system(command.c_str());
+	}
+
+}
 void vision_target(cloudPtr cloud, Robot* robot){
 	
 	//assume we are just here to avoid an object
@@ -543,8 +684,9 @@ void vision_target(cloudPtr cloud, Robot* robot){
 			 command = "python ../utils/oneStep.py -r 30 ";
 		}
 
-		std::cout << "going to move "<<command << std::endl<< "Enter y if this is ok"<<std::endl;
+		std::cout << "going to move "<<command << std::endl;
 	if (testing){
+		std::cout << "Enter y if this is ok"<<std::endl;
 		char ok;
 		std::cin >> ok;
 		if (ok=='y'){
@@ -568,9 +710,11 @@ void vision_target(cloudPtr cloud, Robot* robot){
 void compute_step(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, Robot* robot){
 
 	if(robot->method==GPS)
-		gps_target(cloud, robot);
+		gps_simple(cloud, robot);
+		//gps_target(cloud, robot);
 	else if (robot->method==VISION)
-		vision_target(cloud, robot);
+		vision_simple(cloud, robot);
+		//vision_target(cloud, robot);
 
 }
 

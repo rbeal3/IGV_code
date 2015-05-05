@@ -75,8 +75,7 @@ int doStereo( TriclopsContext const & triclops,
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & grabbedImage,
                   TriclopsContext const & triclops,
                   TriclopsImage16 const & disparityImage16,
-                  TriclopsInput   const & colorData,
-                  std::string outname );
+                  TriclopsInput   const & colorData);
 
 
 //
@@ -239,7 +238,7 @@ void update_gps(Robot* robot){
 		std::cout << "Error: No GPS file found!"  << std::endl;
 	}
 	
-	///*Debug
+	/*Debug
 		for(int i=0; i<5; i++){
 			std::cout << "position Info " << m_position[i] << std::endl;
 		} //*/
@@ -470,9 +469,10 @@ cloudPtr plainSeg(cloudPtr cloud)
 }
 
 
-void color_filter (cloudPtr cursory_conversion, pcl::PointCloud<pcl::PointXYZRGB>* whiteCloud, pcl::PointCloud<pcl::PointXYZRGB>* redCloud, pcl::PointCloud<pcl::PointXYZRGB>* blueCloud)
+	pcl::PointCloud<pcl::PointXYZRGB>* color_filter (cloudPtr cursory_conversion, pcl::PointCloud<pcl::PointXYZRGB>* redCloud, pcl::PointCloud<pcl::PointXYZRGB>* blueCloud)
 {
 	//remove any dark points first pcl::PointCloud
+	pcl::PointCloud<pcl::PointXYZRGB>* whiteCloud = new pcl::PointCloud<pcl::PointXYZRGB> ;
 	pcl::PointCloud<pcl::PointXYZRGB> inCloud = *cursory_conversion;
 	//pcl::PointCloud<pcl::PointXYZRGB> *outCloud = new pcl::PointCloud<pcl::PointXYZRGB>;
 	for(int i = 0; i < inCloud.points.size(); i++) {
@@ -487,19 +487,15 @@ void color_filter (cloudPtr cursory_conversion, pcl::PointCloud<pcl::PointXYZRGB
 		}
 	}
 		printf("Colors filtered\n");
+		return whiteCloud;
 }
 	//pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (outCloud);
 
 	/*
-	for ( std::vector<pcl::PointXYZRGB>::iterator pit = cloud->points.begin(); pit != cloud->points.end(); ++pit){
-		//std::cout <<  cloud->points[i].r << " " << cloud->points[i].g << " " << cloud->points[i].b << std::endl;
-		//printf("r:%c g:%c b:%c\n" , cloud->points[i].r, cloud->points[i].g, cloud->points[i].b );
-		if ( cloud->points[*pit].r<200)//  cloud->points[i].g, cloud->points[i].b );
-		{
+	for ( <pcl::PointXYZRGB>::iterator pit = cloud->points.begin(); pit != cloud->points.end(); ++pit){
 			printf("erasing pointk");
 			cloud->points.erase(pit);
 		}
-	}
 	*/
 void color_segment (cloudPtr cloud, pcl::PointCloud<pcl::PointXYZRGB> &whiteCloud, pcl::PointCloud<pcl::PointXYZRGB> &redCloud, pcl::PointCloud<pcl::PointXYZRGB> &blueCloud)
 {
@@ -609,19 +605,17 @@ int count_points(float startx, float stopx, float starty, float stopy, float sta
 	return accepted_counter;
 }
 
-//pcl::PointCloud<pcl::PointXYZRGB>::Ptr area_seg(float startx, float stopx, float starty, float stopy, float startz, float stopz, pcl::PointCloud<pcl::PointXYZRGB>::Ptr inCloud, std::string outname) {
-void area_seg(float startx, float stopx, float starty, float stopy, float startz, float stopz, pcl::PointCloud<pcl::PointXYZRGB>::Ptr &inCloud, pcl::PointCloud<pcl::PointXYZRGB> &outCloud, std::string outname) {
+//pcl::PointCloud<pcl::PointXYZRGB>::Ptr area_seg(float startx, float stopx, float starty, float stopy, float startz, float stopz, pcl::PointCloud<pcl::PointXYZRGB>::Ptr inCloud, std::string outname) 
+		pcl::PointCloud<pcl::PointXYZRGB>*  area_seg(float startx, float stopx, float starty, float stopy, float startz, float stopz, pcl::PointCloud<pcl::PointXYZRGB>::Ptr &inCloud) {
 
 	std::cout << "area_seg begin" << std::endl
 	<< "x, x2, y, y, z, z2:" << startx<<", " << stopx <<", " << starty <<", " << stopy <<", " << startz <<", " << stopz << std::endl;
 	FILE             * pPointFile;
 
+		pcl::PointCloud<pcl::PointXYZRGB> *outCloud = new pcl::PointCloud<pcl::PointXYZRGB> ;
 	int denied_counter = 0;
 	int accepted_counter = 0;
-	 printf("the outcloud is %d\n",outCloud.points.size());
-	if (outCloud.size()>0)
-		outCloud.clear();
-	if ( inCloud->points.size() <= 1) { printf("This is an error. The incloud is empty\n"); return;}
+	if ( inCloud->points.size() <= 1) { printf("This is an error. The incloud is empty\n"); return outCloud;}
 	for(int i = 0; i < inCloud->points.size(); i++) {
 
 		if (inCloud->points[i].x >= startx
@@ -632,7 +626,7 @@ void area_seg(float startx, float stopx, float starty, float stopy, float startz
 				&& inCloud->points[i].z <= stopz)
 		{
 			//std::cout << "point accepted "<<std::endl;
-			outCloud.points.push_back(inCloud->points[i]);
+			outCloud->points.push_back(inCloud->points[i]);
 		  accepted_counter++;
 		}
 		else {
@@ -643,35 +637,11 @@ void area_seg(float startx, float stopx, float starty, float stopy, float startz
 			 << " points denied: " << denied_counter
 			 << " ratio: " << (float)accepted_counter/(float)denied_counter*100 << "%" <<std::endl;
 	//hacks to get around width*height error
-		outCloud.width = 1;
-		outCloud.height = accepted_counter;
-			std::cout << "point cloud size: " << outCloud.size() << std::endl;
-	// Save points to disk
+		outCloud->width = 1;
+		outCloud->height = accepted_counter;
+			std::cout << "point cloud size: " << outCloud->size() << std::endl;
 
-			if (outname.compare("null")){//if filename is not null
-				pPointFile = fopen( outname.c_str(), "w+" );
-				pcl::io::savePCDFile (outname.c_str(), outCloud);
-
-				int cursorLocation  = ftell(pPointFile);
-				fseek(pPointFile, 0L, SEEK_END);
-				int fileSize =ftell(pPointFile);
-				fseek(pPointFile, 0L, cursorLocation);
-
-
-				if ( pPointFile != NULL &&  fileSize>1) {
-					//printf("Opening output file %s\n", outname);
-					std::cout << "***saving*** " << outCloud.points.size() << " points" << std::endl;
-					std::cout << "File " << outname << " written sucessfully"<<std::endl;
-				}
-				else {
-					//printf("Error opening output file %s\n", outname);
-					std::cout<<"Error opening output file"<< outname << std::endl;
-				}
-				fclose(pPointFile);
-			}
-
-	//pcl::PointCloud<pcl::PointXYZRGB>::Ptr Real_outCloud(&outCloud);//= new pcl::PointCloud<pcl::PointXYZRGB>::Ptr(outCloud);
-	//return Real_outCloud;
+	return outCloud;
 }
 
 float * seg_info(pcl::PointCloud<pcl::PointXYZRGB>::Ptr incloud) {
@@ -945,8 +915,7 @@ int doStereo( TriclopsContext const & triclops,
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & grabbedImage,
                   TriclopsContext const & triclops,
                   TriclopsImage16 const & disparityImage16,
-                  TriclopsInput   const & colorData,
-                  std::string outname)
+                  TriclopsInput   const & colorData)
 {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
     TriclopsImage monoImage = {0};
@@ -982,13 +951,6 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & gra
         _HANDLE_TRICLOPS_ERROR( "triclopsGetImage()", te );
     }
 
-
-    // Save points to disk
-    pPointFile = fopen( outname.c_str(), "w+" );
-    if ( pPointFile == NULL )
-    {
-				std::cout<< "Error opening output file ," << outname << std::endl;
-    }
 
     // The format for the output file is:
     // <x> <y> <z> <red> <grn> <blu> <row> <col>
@@ -1038,7 +1000,5 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr save3dPoints( FC2::Image      const & gra
             }
         }
 		}
-    pcl::io::savePCDFile (outname.c_str(), *cloud);
-
     return cloud;
 }
